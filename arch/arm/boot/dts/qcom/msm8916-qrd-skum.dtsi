@@ -88,7 +88,7 @@
 		liteon,als-polling-time = <200>;
 		liteon,als-ps-persist = <0>;
 		liteon,ps-led = <0x7f>;
-		liteon,ps-pulses = <12>;
+		liteon,ps-pulses = <4>;
 		liteon,wakeup-threshold = <4>;
 		liteon,als-integration-time = <0>;
 		liteon,als-equation-0 = <1 1 7743 1059 600 1>;
