@@ -38,6 +38,16 @@
 #include <media/radio-iris.h>
 #include <asm/unaligned.h>
 
+#if defined(CONFIG_RADIO_IRIS_TRANSPORT) && defined(CONFIG_RADIO_IRIS_TRANSPORT_NO_FIRMWARE)
+#define IRIS_TRANSPORT_NO_FIRMWARE
+#endif
+
+#ifdef IRIS_TRANSPORT_NO_FIRMWARE
+extern int fmsmd_ready;
+extern int radio_hci_smd_init(void);
+extern void radio_hci_smd_deregister(void);
+#endif
+
 static unsigned int rds_buf = 100;
 static int oda_agt;
 static int grp_mask;
@@ -62,7 +72,9 @@ static void radio_hci_cmd_task(unsigned long arg);
 static void radio_hci_rx_task(unsigned long arg);
 static struct video_device *video_get_dev(void);
 static DEFINE_RWLOCK(hci_task_lock);
+#if 0
 extern struct mutex fm_smd_enable;
+#endif
 
 typedef int (*radio_hci_request_func)(struct radio_hci_dev *hdev,
 		int (*req)(struct
@@ -3138,6 +3150,7 @@ static int set_low_power_mode(struct iris_device *radio, int power_mode)
 
 	int rds_grps_proc = 0x00;
 	int retval = 0;
+	struct hci_fm_rds_grp_req grp_3a;
 
 	if (unlikely(radio == NULL)) {
 		FMDERR(":radio is null");
@@ -3147,6 +3160,13 @@ static int set_low_power_mode(struct iris_device *radio, int power_mode)
 	if (radio->power_mode != power_mode) {
 
 		if (power_mode) {
+			memcpy(&grp_3a, &radio->rds_grp,
+					sizeof(struct hci_fm_rds_grp_req));
+			/* Disable 3A group */
+			grp_3a.rds_grp_enable_mask &= ~FM_RDS_3A_GRP;
+			retval = hci_fm_rds_grp(&grp_3a, radio->fm_hdev);
+			if (retval < 0)
+				FMDERR("error in disable 3A group mask\n");
 			radio->event_mask = 0x00;
 			if (radio->af_jump_bit)
 				rds_grps_proc = 0x00 | AF_JUMP_ENABLE;
@@ -3162,7 +3182,11 @@ static int set_low_power_mode(struct iris_device *radio, int power_mode)
 			retval = hci_conf_event_mask(&radio->event_mask,
 				radio->fm_hdev);
 		} else {
-
+			/* Enable RDS group to normal */
+			retval = hci_fm_rds_grp(&radio->rds_grp,
+							radio->fm_hdev);
+			if (retval < 0)
+				FMDERR("error in enable 3A group mask\n");
 			radio->event_mask = SIG_LEVEL_INTR |
 					RDS_SYNC_INTR | AUDIO_CTRL_INTR;
 			retval = hci_conf_event_mask(&radio->event_mask,
@@ -5221,11 +5245,14 @@ static int iris_fops_release(struct file *file)
 		return retval;
 	}
 END:
+#ifdef IRIS_TRANSPORT_NO_FIRMWARE
+	if (radio->fm_hdev != NULL)
+#else
 	mutex_lock(&fm_smd_enable);
 	if (radio->fm_hdev != NULL)
 		radio->fm_hdev->close_smd();
 	mutex_unlock(&fm_smd_enable);
-
+#endif
 	if (retval < 0)
 		FMDERR("Err on disable FM %d\n", retval);
 
@@ -5426,6 +5453,15 @@ static const struct v4l2_ioctl_ops iris_ioctl_ops = {
 	.vidioc_g_ext_ctrls           = iris_vidioc_g_ext_ctrls,
 };
 
+#ifdef IRIS_TRANSPORT_NO_FIRMWARE
+static int iris_fops_open(struct file *f) {
+	if (fmsmd_ready < 0) {
+		fmsmd_ready = radio_hci_smd_init();
+	}
+        return fmsmd_ready;
+}
+#endif
+
 static const struct v4l2_file_operations iris_fops = {
 	.owner = THIS_MODULE,
 	.unlocked_ioctl = video_ioctl2,
@@ -5433,7 +5469,11 @@ static const struct v4l2_file_operations iris_fops = {
 	.compat_ioctl32 = v4l2_compat_ioctl32,
 #endif
 	.release        = iris_fops_release,
+#ifdef IRIS_TRANSPORT_NO_FIRMWARE
+	.open           = iris_fops_open,
+#endif
 };
+
 
 static struct video_device iris_viddev_template = {
 	.fops                   = &iris_fops,

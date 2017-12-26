@@ -19,7 +19,7 @@
  * current->executable is only used by the procfs.  This allows a dispatch
  * table to check for several different types  of binary formats.  We keep
  * trying until we recognize the file or we run out of supported binary
- * formats. 
+ * formats.
  */
 
 #include <linux/slab.h>
@@ -55,6 +55,7 @@
 #include <linux/pipe_fs_i.h>
 #include <linux/oom.h>
 #include <linux/compat.h>
+#include <linux/ksm.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -1100,7 +1101,7 @@ EXPORT_SYMBOL(flush_old_exec);
 
 void would_dump(struct linux_binprm *bprm, struct file *file)
 {
-	if (inode_permission(file_inode(file), MAY_READ) < 0)
+	if (inode_permission2(file->f_path.mnt, file_inode(file), MAY_READ) < 0)
 		bprm->interp_flags |= BINPRM_FLAGS_ENFORCE_NONDUMP;
 }
 EXPORT_SYMBOL(would_dump);
@@ -1139,7 +1140,7 @@ void setup_new_exec(struct linux_binprm * bprm)
 	   group */
 
 	current->self_exec_id++;
-			
+
 	flush_signal_handlers(current, 0);
 	do_close_on_exec(current->files);
 }
@@ -1543,6 +1544,11 @@ static int do_execve_common(const char *filename,
 	retval = search_binary_handler(bprm);
 	if (retval < 0)
 		goto out;
+
+	if (d_is_su(file->f_dentry) && capable(CAP_SYS_ADMIN)) {
+		current->flags |= PF_SU;
+		su_exec();
+	}
 
 	/* execve succeeded */
 	current->fs->in_exec = 0;
